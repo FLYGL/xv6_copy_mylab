@@ -1,0 +1,1 @@
+#define CheckFalse(state,label) while(0){ if(!(state)) goto label;}
