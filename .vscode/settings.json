@@ -3,6 +3,7 @@
         "user.h": "c",
         "types.h": "c",
         "util.h": "c",
-        "fs.h": "c"
+        "fs.h": "c",
+        "syscall.h": "c"
     }
 }
