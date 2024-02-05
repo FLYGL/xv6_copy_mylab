@@ -140,6 +140,16 @@ found:
     return 0;
   }
 
+  //set syscall page 
+  struct usyscall tmpSyscallPage;
+  tmpSyscallPage.pid = p->pid;
+  if(copyout(p->pagetable, USYSCALL,(char*)&tmpSyscallPage,sizeof(tmpSyscallPage)) != 0)
+  {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -177,10 +187,11 @@ pagetable_t
 proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
-
+  void* syscall_pagetable = 0;
   // An empty page table.
   pagetable = uvmcreate();
-  if(pagetable == 0)
+  syscall_pagetable = kalloc();
+  if(pagetable == 0 || syscall_pagetable == 0)
     return 0;
 
   // map the trampoline code (for system call return)
@@ -202,6 +213,15 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  //map syscall_page
+  if(mappages(pagetable, USYSCALL, PGSIZE, (uint64)syscall_pagetable, PTE_R | PTE_U) < 0)
+  {
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -212,6 +232,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 1);
   uvmfree(pagetable, sz);
 }
 

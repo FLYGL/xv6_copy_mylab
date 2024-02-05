@@ -75,6 +75,42 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  pagetable_t pagetable = 0;
+  char* tempBuffer = 0;
+  uint64 va;
+  int pagecount;
+  uint64 bitaddress;
+
+  argaddr(0, &va);
+  argint(1, &pagecount);
+  argaddr(2, &bitaddress);
+
+  pagetable = myproc()->pagetable;
+  if(pagetable == 0)
+    panic("pgaccess error: process no right root pagetable");
+
+  tempBuffer = (char*)kalloc();
+  if(!tempBuffer)
+    panic("alloc tmp buffer error!");
+  memset(tempBuffer, 0, PGSIZE);
+
+  va = PGROUNDDOWN(va);
+
+  for(int i = 0; i < pagecount; ++i)
+  {
+    uint64 tmpVa = va + i * PGSIZE;
+    pte_t *pte = walk(pagetable, tmpVa, 0);
+    if(pte && (*pte & PTE_A))
+    {
+      *pte &= ~PTE_A;
+      char* tmpStartByte = tempBuffer + i / 8;
+      *tmpStartByte |= 1 << (i % 8);
+    }
+  }
+  if(copyout(pagetable, bitaddress, tempBuffer, (pagecount + 8 - 1) / 8 ) < 0)
+    panic("pgaccess copy buffer from kenerl to user error!");
+
+  kfree(tempBuffer);
   return 0;
 }
 #endif
