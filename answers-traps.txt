@@ -1,0 +1,6 @@
+1. a2 register save 13
+2. f function inlined
+3. printf at 0x642
+4. ra = 0x38
+5. he110,world, little-endian
+6. because use the undefined  value of the register a2

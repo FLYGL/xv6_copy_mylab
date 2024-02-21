@@ -64,10 +64,15 @@ test0()
 }
 
 void __attribute__ ((noinline)) foo(int i, int *j) {
+  volatile int tmp = *j;
   if((i % 2500000) == 0) {
     write(2, ".", 1);
   }
   *j += 1;
+  if(tmp == *j)
+  {
+    printf("j not increase! %d \n",tmp);
+  }
 }
 
 //
@@ -83,7 +88,8 @@ test1()
 {
   int i;
   int j;
-
+  volatile int iv = 0;
+  volatile int jv = 0;
   printf("test1 start\n");
   count = 0;
   j = 0;
@@ -92,6 +98,14 @@ test1()
     if(count >= 10)
       break;
     foo(i, &j);
+    if(i!=(j-1))
+    {
+      printf("i = %d, j = %d\n",i,j);
+      printf("last : i = %d, j = %d\n",iv,jv);
+      break;
+    }
+    iv = i;
+    jv = j;
   }
   if(count < 10){
     printf("\ntest1 failed: too few calls to the handler\n");
@@ -103,7 +117,7 @@ test1()
     // occurred; another is that that registers may not be
     // restored correctly, causing i or j or the address ofj
     // to get an incorrect value.
-    printf("\ntest1 failed: foo() executed fewer times than it was called\n");
+    printf("\ntest1 failed: foo() executed fewer times than it was called. i=%d, j=%d\n",i,j);
   } else {
     printf("test1 passed\n");
   }
@@ -187,7 +201,7 @@ test3()
   asm volatile("mv %0, a0" : "=r" (a0) );
 
   if(a0 != 0xac)
-    printf("test3 failed: register a0 changed\n");
+    printf("test3 failed: register a0 changed. old 0xac, new %x\n", a0);
   else
     printf("test3 passed\n");
 }

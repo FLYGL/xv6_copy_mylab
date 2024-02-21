@@ -1,5 +1,13 @@
 #ifndef __ASSEMBLER__
 
+static inline uint64
+r_fp()
+{
+  uint64 x;
+  asm volatile("mv %0, s0" : "=r"(x));
+  return x;
+}
+
 // which hart (core) is this?
 static inline uint64
 r_mhartid()
@@ -317,6 +325,13 @@ r_ra()
   uint64 x;
   asm volatile("mv %0, ra" : "=r" (x) );
   return x;
+}
+
+static inline void
+w_ra(uint64 x)
+{
+  
+  asm volatile("mv ra, %0" : :"r" (x));
 }
 
 // flush the TLB.

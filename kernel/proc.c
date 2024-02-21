@@ -145,7 +145,10 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  p->ticks = 0;
+  p->tickhandler = 0;
+  p->remainticks = p->ticks;
+  p->handling = 0;
   return p;
 }
 
@@ -160,6 +163,10 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  p->remainticks = 0;
+  p->tickhandler = 0;
+  p->ticks = 0;
+  p->handling = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -679,5 +686,32 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+int procarrayindex(void)
+{
+  struct proc* p = myproc();
+  return p - proc;
+}
+
+void tickproc()
+{
+  struct proc *mproc = myproc();
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    if(p->ticks != 0)
+    {
+      --p->remainticks;
+      if(p->remainticks <= 0 && mproc == p && !p->handling)
+      {
+          p->handling = 1;
+          p->intcontext = *(p->trapframe);
+          p->trapframe->epc = p->tickhandler;
+          p->remainticks = p->ticks;
+      }
+    }
   }
 }

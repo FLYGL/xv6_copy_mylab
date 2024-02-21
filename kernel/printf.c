@@ -115,9 +115,27 @@ printf(char *fmt, ...)
     release(&pr.lock);
 }
 
+// kernel stack
+void 
+backtrace(void)
+{
+  uint64 fp = r_fp();
+  uint64 ra = 0;
+  int procindex = procarrayindex();
+  uint64 pagestart = KSTACK(procindex);
+  printf("backtrace:\n");
+  while(pagestart == PGROUNDDOWN(fp))
+  {
+    ra = *(((uint64*)fp) - 1);
+    fp = *(((uint64*)fp) - 2);
+    printf("%p\n",ra);
+  }
+}
+
 void
 panic(char *s)
 {
+  backtrace();
   pr.locking = 0;
   printf("panic: ");
   printf(s);
