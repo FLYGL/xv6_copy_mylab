@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "*.tcc": "c",
+        "chrono": "c",
+        "string_view": "c",
+        "algorithm": "c",
+        "random": "c",
+        "limits": "c",
+        "numeric": "c"
+    }
+}

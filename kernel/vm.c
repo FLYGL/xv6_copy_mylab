@@ -308,8 +308,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
-
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
@@ -317,19 +315,25 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    if(flags & PTE_W)
+    {
+      //clear write flag
+      flags &= ~PTE_W;
+      flags |= PTE_COW;
+      //modify parent flag
+      *pte = PA2PTE(pa) | flags;
+    }
+    //map the same page to child process
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      panic("mappages error!");
+    }
+    else
+    {
+      krefpage(pa);
     }
   }
-  return 0;
 
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -352,9 +356,15 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
-
+  //valid virtual address
+  if(dstva + len < dstva)
+  {
+    return -1;
+  }
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if(kcowpage(pagetable, va0) == -2)
+      return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
