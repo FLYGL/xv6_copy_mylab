@@ -11,12 +11,14 @@
 struct entry {
   int key;
   int value;
+  pthread_mutex_t mutex;
   struct entry *next;
 };
 struct entry *table[NBUCKET];
+pthread_mutex_t g_headmutex[NBUCKET];
+
 int keys[NKEYS];
 int nthread = 1;
-
 
 double
 now()
@@ -27,44 +29,69 @@ now()
 }
 
 static void 
-insert(int key, int value, struct entry **p, struct entry *n)
+insert(int key, int value, struct entry **p, int bucketnum)
 {
   struct entry *e = malloc(sizeof(struct entry));
   e->key = key;
   e->value = value;
-  e->next = n;
+  pthread_mutex_init(&e->mutex,NULL);
+  pthread_mutex_lock(&g_headmutex[bucketnum]);
+  e->next = *p;
   *p = e;
+  pthread_mutex_unlock(&g_headmutex[bucketnum]);
 }
 
 static 
 void put(int key, int value)
 {
   int i = key % NBUCKET;
-
   // is the key already present?
-  struct entry *e = 0;
-  for (e = table[i]; e != 0; e = e->next) {
-    if (e->key == key)
-      break;
+  pthread_mutex_lock(&g_headmutex[i]);
+  struct entry *e = table[i];
+  if(e)
+  {
+    if(e->key == key)
+    {
+      e->value = value;
+      pthread_mutex_unlock(&g_headmutex[i]);
+      return;
+    }
+    else
+    {
+      e = e->next;
+    }
   }
+  pthread_mutex_unlock(&g_headmutex[i]);
+
+
+  while(e != 0)
+  {
+    if (e->key == key)
+    {
+      break;
+    }
+    e = e->next;
+  }
+
   if(e){
     // update the existing key.
+    pthread_mutex_lock(&e->mutex);
     e->value = value;
+    pthread_mutex_unlock(&e->mutex);
   } else {
     // the new is new.
-    insert(key, value, &table[i], table[i]);
+    insert(key, value, &table[i], i);
   }
-
 }
 
 static struct entry*
 get(int key)
 {
   int i = key % NBUCKET;
-
-
   struct entry *e = 0;
-  for (e = table[i]; e != 0; e = e->next) {
+
+  e = table[i];
+  for (; e != 0; e = e->next) {
     if (e->key == key) break;
   }
 
@@ -117,6 +144,10 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+  for(int i = 0; i < NBUCKET; ++i)
+  {
+    pthread_mutex_init(&g_headmutex[i], NULL);
+  }
 
   //
   // first the puts
@@ -147,4 +178,9 @@ main(int argc, char *argv[])
 
   printf("%d gets, %.3f seconds, %.0f gets/second\n",
          NKEYS*nthread, t1 - t0, (NKEYS*nthread) / (t1 - t0));
+
+  for(int i = 0; i < NBUCKET; ++i)
+  {
+    pthread_mutex_destroy(&g_headmutex[i]);
+  }
 }
