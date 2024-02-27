@@ -1,0 +1,99 @@
+// Allocate one 4096-byte page of physical memory.
+// Returns a pointer that the kernel can use.
+// Returns 0 if the memory cannot be allocated.
+void *
+_kalloc(void)
+{
+  struct run *r;
+  push_off();
+  int id = cpuid();
+  acquire(&kmem[id].lock);
+  //start steal
+  if(!kmem[id].freelist)
+  {
+    int count[NCPU];
+    int cpuids[NCPU];
+    int stealnum = 0;
+    for(int i = NCPU - 1; i >= 0; --i)
+    {
+      cpuids[i] = i;
+      if(i == id)
+      {
+        count[i] = 0;
+        continue;
+      }
+      acquire(&kmem[i].lock);
+      count[i] = kmem[i].pagecount;
+      release(&kmem[i].lock);
+    }
+    for(int i = 0; i < NCPU; ++i)
+    {
+      int dealnum = count[i];
+      int dealcpuids = cpuids[i];
+      for(int j = i - 1; j >= 0; --j)
+      {
+          if(dealnum > count[j])
+          {
+            count[j + 1] = count[j];
+            cpuids[j + 1] = cpuids[j];
+          }
+          else
+          {
+            count[j + 1] = dealnum;
+            cpuids[j + 1] = dealcpuids;
+            break;
+          }
+      }
+      if(dealnum > count[0])
+      {
+        count[0] = dealnum;
+        cpuids[0] = dealcpuids;
+      }
+    }
+
+    for(int i = 0; i < NCPU; ++i)
+    {
+      int maxcpuid = cpuids[i];
+      if(maxcpuid == id)
+        continue;
+      acquire(&kmem[maxcpuid].lock);
+      stealnum = kmem[maxcpuid].pagecount < 16? kmem[maxcpuid].pagecount : 16;
+      if(stealnum > 0)
+      {
+        int remain = stealnum;
+        struct run* pos = kmem[maxcpuid].freelist;
+        struct run* lastpos = 0;
+        while(remain > 0)
+        {
+          lastpos = pos;
+          pos = pos->next;
+          remain--;
+        }
+        lastpos->next = 0;
+        kmem[id].freelist = kmem[maxcpuid].freelist;
+        kmem[id].pagecount = stealnum;
+        kmem[maxcpuid].freelist = pos;
+        kmem[maxcpuid].pagecount -= stealnum;
+        release(&kmem[maxcpuid].lock);
+        break;
+      }
+      release(&kmem[maxcpuid].lock);
+    }
+  }
+
+  r = kmem[id].freelist;
+  //alloc
+  if(r)
+  {
+    kmem[id].freelist = r->next;
+    kmem[id].pagecount--;
+    if(kmem[id].pagecount < 0)
+      panic(" invalid page count!");
+  }
+  release(&kmem[id].lock);
+  pop_off();
+
+  if(r)
+    memset((char*)r, 5, PGSIZE); // fill with junk
+  return (void*)r;
+}
