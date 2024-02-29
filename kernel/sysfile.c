@@ -315,7 +315,7 @@ sys_open(void)
     return -1;
 
   begin_op();
-
+  
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
@@ -333,6 +333,33 @@ sys_open(void)
       end_op();
       return -1;
     }
+    if(!(omode & O_NOFOLLOW))
+    {
+      int depth = 30;
+      while(ip->type == T_SYMLINK && depth > 0)
+      {
+        if(readi(ip, 0, (uint64)path, 0, MAXPATH) != MAXPATH)
+        {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        iunlockput(ip);
+        if((ip = namei(path)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+        --depth;
+      }
+      if(depth <= 0 && ip->type == T_SYMLINK)
+      {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+    }
+
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -502,4 +529,66 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  int result = -1;
+  char target[MAXPATH], path[MAXPATH];
+  char name[DIRSIZ];
+  struct inode *ip = 0;
+  struct inode *dp = 0;
+  argstr(0, target, MAXPATH);
+  argstr(1, path, MAXPATH);
+  begin_op();
+
+  if((dp = nameiparent(path, name)) == 0)
+  {
+    goto bad;
+  }
+  ilock(dp);
+  if((ip = dirlookup(dp, name, 0)) != 0)
+  {
+    iput(ip);
+    ip = 0;
+    goto bad;
+  }
+  
+  if((ip = ialloc(dp->dev, T_SYMLINK)) == 0)
+  {
+    goto bad;
+  }
+
+  ilock(ip);
+  ip->nlink = 1;
+  iupdate(ip);
+
+  if(writei(ip, 0, (uint64)target, 0, MAXPATH) != MAXPATH)
+  {
+    goto bad;
+  }
+
+  if(dirlink(dp, name, ip->inum) < 0)
+  {
+    goto bad;
+  }
+  result = 0;
+  goto suc;
+
+bad:
+  if(ip)
+  {
+    ip->nlink = 0;
+    iupdate(ip);
+  }
+suc:
+  if(ip)
+  {
+    iunlockput(ip);
+  }
+  if(dp)
+    iunlockput(dp);
+  end_op();
+  return result;
 }
