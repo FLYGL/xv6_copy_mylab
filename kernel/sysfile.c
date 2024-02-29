@@ -507,11 +507,153 @@ sys_pipe(void)
 uint64
 sys_mmap(void)
 {
-  return -1;
+  struct vma* pvms = 0;
+  struct proc* p = myproc();
+  //default = 0;
+  uint64 addr = 0;
+  uint64 length = 0;
+  //ingore
+  int prot = 0;
+  //read write permission
+  int flags = 0;
+  //not care
+  int fd = 0;
+  struct file* pfile = 0;
+  //default = 0;
+  uint64 off = 0;
+  argaddr(0, &addr);
+  argaddr(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argfd(4, &fd, &pfile);
+  argaddr(5, &off);
+
+  if(!pfile->writable && (flags & MAP_SHARED) && (prot != PROT_READ ))
+  {
+    return -1;
+  }
+
+  if(!(prot & PROT_READ) && !(prot & PROT_WRITE))
+  {
+    return -1;
+  }
+  else if(prot & PROT_WRITE)
+  {
+    prot = PTE_W | PTE_R;
+  }
+  else
+  {
+    prot = PTE_R;
+  }
+
+  if(!pfile)
+    return -1;
+
+  //find unused vma
+  for(int i = 0; i < NMMAPVMA; ++i)
+  {
+    if(!pvms && p->mmaparea[i].pfile == 0)
+    {
+      pvms = &p->mmaparea[i];
+    }
+    //check repeat map
+    if(p->mmaparea[i].pfile == pfile)
+      //no check same
+      return p->mmaparea[i].vmaddr;
+  }
+  if(!pvms)
+    panic("no free vma to use!");
+
+  pvms->pfile = filedup(pfile);
+  pvms->vmaddr = PGROUNDUP(p->sz);
+  pvms->length = length;
+  pvms->permiss = flags;
+  pvms->offset = 0;
+  for(uint64 tmpaddr = pvms->vmaddr; tmpaddr < length + pvms->vmaddr; tmpaddr += PGSIZE)
+  {
+    pte_t* pte = walk(p->pagetable, tmpaddr,1);
+    *pte = PTE_U|PTE_LA | prot;
+  }
+  p->sz = pvms->vmaddr + length;
+  // printf("kenerl map addr %x\n", pvms->vmaddr);
+  return pvms->vmaddr;
+}
+
+int kmunmap(pagetable_t pagetable, struct vma* pvma, uint64 addr, uint64 length)
+{
+  if(!pvma)
+  {
+    printf("munmap none pvma!\n");
+    return -1;
+  }
+
+  if((addr != pvma->vmaddr) && (addr + length != pvma->vmaddr + pvma->length))
+  {
+    printf("munmap addr not match!\n");
+    return -1;
+  }
+  for(uint64 tmpaddr = addr; tmpaddr < addr + length; tmpaddr += PGSIZE)
+  {
+    pte_t* pte = walk(pagetable, tmpaddr, 0);
+    if(!pte)
+      panic("invalid pte!");
+    int pteflags = PTE_FLAGS(*pte);
+    if(pteflags & PTE_V)
+    {
+      uint64 pa = PTE2PA(*pte);
+      if(pvma->permiss == MAP_SHARED && (pteflags & PTE_D))
+      {
+        uint writesize = (tmpaddr + PGSIZE < addr + length) ? PGSIZE : addr + length - tmpaddr;
+        begin_op();
+        ilock(pvma->pfile->ip);
+        if(writei(pvma->pfile->ip, 0, pa, pvma->offset + (tmpaddr - addr), writesize) != writesize)
+        {
+          panic("munmap write error!");
+        }
+        iunlock(pvma->pfile->ip);
+        end_op();
+      }
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+  if(addr == pvma->vmaddr)
+  {
+    pvma->vmaddr = addr + length;
+    pvma->offset += length;
+  }
+  pvma->length -= length;
+
+  if(pvma->length == 0)
+  {
+    pvma->vmaddr = 0;
+    fileclose(pvma->pfile);
+    pvma->pfile = 0;
+    pvma->permiss = 0;
+    pvma->offset = 0;
+  }
+  return 0;
 }
 
 uint64
 sys_munmap(void)
 {
-  return -1;
+  uint64 addr = 0;
+  uint64 length = 0;
+  argaddr(0, &addr);
+  argaddr(1, &length);
+
+  struct vma* pvma = 0;
+  struct proc* p = myproc();
+  for(int i = 0; i < NMMAPVMA; ++i)
+  {
+    struct vma* ptmpvma = &p->mmaparea[i];
+    if(ptmpvma->vmaddr <= addr && addr < (ptmpvma->vmaddr + ptmpvma->length))
+    {
+      pvma = ptmpvma;
+      break;
+    }
+  }
+
+  return kmunmap(p->pagetable, pvma, addr, length);
 }

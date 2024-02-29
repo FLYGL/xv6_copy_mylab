@@ -180,3 +180,55 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+int
+filemmaplazy(pagetable_t pagetable, uint64 faultva)
+{
+  if(faultva >= MAXVA)
+    return -2;
+    
+  pte_t* pte = walk(pagetable, faultva, 0);
+  // valid pte
+  if(!pte)
+  {
+    return -2;
+  }
+  if((*pte & PTE_LA) && (PTE2PA(*pte) == 0))
+  {
+    struct proc* p = myproc();
+    struct vma* pvma = 0;
+    for(int i = 0; i < NMMAPVMA; ++i)
+    {
+      if(p->mmaparea[i].vmaddr <= faultva && (p->mmaparea[i].vmaddr + p->mmaparea[i].length) > faultva)
+      {
+        pvma = &p->mmaparea[i];
+        break;
+      }
+    }
+    if(!pvma)
+      return -1;
+    
+    uint flags;
+    void* newpage = kalloc();
+    if(!newpage)
+      panic("no free memory to copy cow page!");
+
+    memset(newpage, 0 , PGSIZE);
+    
+    uint off = PGROUNDDOWN(faultva - pvma->vmaddr);
+    ilock(pvma->pfile->ip);
+    if(readi(pvma->pfile->ip, 0, (uint64)newpage, off, PGSIZE) == 0)
+    {
+      iunlock(pvma->pfile->ip);
+      kfree(newpage);
+      panic("map pagefault readfile fail");
+      return -1;
+    }
+    iunlock(pvma->pfile->ip);
+
+    flags = PTE_FLAGS(*pte) | PTE_V;
+    flags &= ~PTE_LA;
+    *pte = PA2PTE(newpage) | flags;
+    return 0;
+  }
+  return -1;
+}

@@ -308,6 +308,29 @@ fork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  //mmap
+  for(i = 0; i < NMMAPVMA; ++i)
+  {
+    struct vma* pvma = &p->mmaparea[i];
+    np->mmaparea[i] = *pvma;
+    if(!pvma->pfile)
+      continue;
+    
+    pvma->pfile = filedup(pvma->pfile);
+    uint64 endaddr = pvma->vmaddr + pvma->length;
+    for(uint64 tmpaddr = pvma->vmaddr; tmpaddr < endaddr; tmpaddr += PGSIZE)
+    {
+      uint64 copysize = tmpaddr + PGSIZE < endaddr ? PGSIZE : endaddr - tmpaddr;
+      pte_t* pte = walk(np->pagetable, tmpaddr, 0);
+      int tmpflag = PTE_FLAGS(*pte);
+      if(!(tmpflag & PTE_V))
+        continue;
+      void* newpage = kalloc();
+      memmove(newpage, (void*)PTE2PA(*pte), copysize);
+      *pte = PA2PTE(newpage) | tmpflag;
+    }
+  }
+
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -364,6 +387,18 @@ exit(int status)
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+
+  //unmap all maps
+  for(int i = 0; i < NMMAPVMA; ++i)
+  {
+    struct vma* pvma = &p->mmaparea[i];
+    if(!pvma->pfile)
+      continue;
+    if(kmunmap(p->pagetable, pvma, pvma->vmaddr, pvma->length))
+    {
+      panic("exiting all unmap");
+    }
+  }
 
   acquire(&wait_lock);
 

@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+
 struct spinlock tickslock;
 uint ticks;
 
@@ -15,6 +16,7 @@ extern char trampoline[], uservec[], userret[];
 void kernelvec();
 
 extern int devintr();
+int exceptionintr();
 
 void
 trapinit(void)
@@ -68,9 +70,7 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    setkilled(p);
+    exceptionintr();
   }
 
   if(killed(p))
@@ -219,3 +219,22 @@ devintr()
   }
 }
 
+int
+exceptionintr()
+{
+  struct proc* p = myproc();
+  uint64 scause = r_scause();
+  if(scause == 15 || scause == 13)
+  {
+    uint64 faultva = r_stval();
+    if(filemmaplazy(p->pagetable, faultva) == 0)
+    {
+      return 0;
+    }
+  }
+
+  printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+  printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+  setkilled(p);
+  return -1;
+}
